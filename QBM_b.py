@@ -78,6 +78,7 @@ class QBM:
         print(w)
         return b,w,gamma
     def matrix_list(self):
+        N=self.N
         gamma_list=[None]*N
         gamma_list_re=np.empty(N,dtype=object)
         b_list=[None]*N
@@ -205,7 +206,7 @@ class QBM:
         for n, theta in enumerate(x_list[0:N+N*N]):
             grad=0
             print("start intergrate")
-            trall=self.intergrade_aver(x,I,theta,H)
+            trall=self.cal_average(x,theta,H)
             print(trall)
             for i, k in enumerate(self.Pv):
                 grad += k * (self.cal_trHv(self.state[i],x,theta,H)/self.cal_trHv(self.state[i],x,I,H)-trall/Z)
@@ -214,7 +215,7 @@ class QBM:
 
         grad=0
         x_sum=np.sum(x_list[N+N*N:(2+N)*N])
-        trxall=self.intergrade_aver(x, I, x_sum,H)
+        trxall=self.cal_average(x, x_sum,H)
         for v, k in enumerate(self.Pv):
             grad += k * (self.cal_trHv(self.state[v],x, x_sum,H) / self.cal_trHv(self.state[v],x,I,H) - trxall / Z)
         grad_f[-1]=grad
