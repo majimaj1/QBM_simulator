@@ -1,4 +1,3 @@
-#这是一个用于训练QBM的程序
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import quad
@@ -29,14 +28,29 @@ class QBM:
         self.gamma=gamma
         self.b=b
         self.w=w
-        self.f=self.wb_to_f(self.gamma,self.b,self.w)
-        self.ops=[np.identity(2)]*10
+        self.x=self.wb_to_f(self.gamma,self.b,self.w)
+        self.x_operator=self.matrix_list()
+        self.ops=[np.identity(2) for _ in range(self.N)]
         self.binary_list=self.binary_all()
         self.points=points
         self.Pv=Pv
         self.binary_points=[self.ret_binary(k) for k in points]
         self.lam=[self.lambda_v(num) for num in self.binary_points]
+        self.state=[self.state_v(num) for num in self.binary_points]
         self.loss_list=[]
+    def state_v(self,num):
+        T = np.array([1, 0])
+        F = np.array([0, 1])
+        if num[0] == 1:
+            lam = T
+        if num[0] == -1:
+            lam = F
+        for k in num[1:]:
+            if k == 1:
+                lam = np.kron(lam, T)
+            if k == -1:
+                lam = np.kron(lam, F)
+        return lam
     def lambda_v(self,num):
         T=np.array([[1,0],
                   [0,0]])
@@ -58,17 +72,19 @@ class QBM:
         return f
     def f_to_b_w_gamma(self,f):
         N = self.N
-        b=np.zeros(N)
-        w=np.zeros((N,N))
-        gamma=0
-        b=f[0:N]
-        w=f[N:N+N*N].reshape(N,N)
-        gamma=f[N+N*N]
+        b = f[0:N]
+        w = f[N:N + N * N].reshape(N, N)
+        gamma =  float(f[N + N*N])
+        print(w)
         return b,w,gamma
     def matrix_list(self):
         gamma_list=[None]*N
+        gamma_list_re=np.empty(N,dtype=object)
         b_list=[None]*N
+        b_list_re=np.empty(N,dtype=object)
         w_list=[[None]*N for _ in range(0,N)]
+        w_list_re=np.empty(N*N,dtype=object)
+        f_list=np.empty(2*N+N*N,dtype=object)
         sigma_z = np.array([[1, 0],
                             [0, -1]])
         sigma_x = np.array([[0, 1],
@@ -77,8 +93,8 @@ class QBM:
         grid= [[None]*N for _ in range(0,N)]
 
         for i in range(0,self.N):
-            ops_x=self.ops
-            ops_z=self.ops
+            ops_x=[np.identity(2) for _ in range(self.N)]
+            ops_z=[np.identity(2) for _ in range(self.N)]
             ops_x[i]=sigma_x
             ops_z[i]=sigma_z
             res_x=ops_x[0]
@@ -88,16 +104,22 @@ class QBM:
             for zi in ops_z[1:]:
                 res_z=np.kron(res_z,zi)
             gamma_list[i]=res_x
+            gamma_list_re[i]=res_x
             b_list[i]=res_z
+            b_list_re[i]=res_z
             for j in range(0,N):
-                ops_z2=self.ops
+                ops_z2=[np.identity(2) for _ in range(self.N)]
                 ops_z2[j]=sigma_z
                 res_z2=ops_z2[0]
                 for z2i in ops_z2[1:]:
                     res_z2=np.kron(res_z2,z2i)
                 w_list[i][j]=res_z@res_z2
-        return gamma_list,b_list,w_list
-    def cal_H(self,gamma,b,w):
+                w_list_re[i*N+j]=res_z@res_z2
+            f_list[0:N]=b_list_re[:]
+            f_list[N:N*N+N]=w_list_re[:]
+            f_list[N*N+N:]=gamma_list_re[:]
+        return f_list
+    def cal_H(self,x):
         """
         计算H的值
         :param gamma:
@@ -105,12 +127,11 @@ class QBM:
         :param w:
         :return:
         """
-        gamma_list,b_list,w_list=self.matrix_list()
-        H=np.zeros((np.pow(2,self.N),np.pow(2,self.N)))
-        for i in range(0,self.N):
-            H+=gamma*gamma_list[i]+b[i]*b_list[i]
-            for j in range(0,self.N):
-                H+=w[i,j]*w_list[i][j]
+        x_operator=np.empty(N+N*N+1,dtype=object)
+        x_operator[0:N+N*N]=self.x_operator[0:N+N*N]
+        x_operator[N+N*N]=np.sum(self.x_operator[N+N*N:2*N+N*N])
+        H=np.sum(x*x_operator)
+
         return H
     def ret_binary(self,num):
         stor = num
@@ -125,20 +146,29 @@ class QBM:
         for i in range(0,1024):
             all[:,i]=self.ret_binary(i)
         return all
-    def cal_average(self,gamma,b,w,operator):
+    def cal_trHv(self,state,x,operator,H):
+        trace=0
+        aver=np.conjugate(state).T@H@state
+        grad=np.conjugate(state).T@operator@state
+        trace+=np.exp(aver)*grad
+        return trace
+
+    def cal_average(self,x,operator,H):
         aver=0
         P=np.zeros(np.pow(2,self.N))
-        H=self.cal_H(gamma,b,w)
         eigvals,U=np.linalg.eig(H)
+        l_min=np.min(eigvals)
+        scales=eigvals-l_min
         U_dagger=np.conjugate(U).T
         operator_trans=U_dagger@operator@U
         for i in range(0,1024):
-            aver+=operator_trans[i,i]*np.exp(-eigvals[i])
+            aver+=operator_trans[i,i]*np.exp(-scales[i])
+
+        aver*=np.exp(-l_min)
         return aver
-    def intergrade_aver(self,gamma,b,w,operator1,operator2):
+    def intergrade_aver(self,x,operator1,operator2,H):
         aver=0
         diagnal_H=np.identity(np.pow(2, self.N))
-        H = self.cal_H(gamma, b, w)
         eigvals, U = np.linalg.eig(H)
         for i,k in enumerate(eigvals):
             diagnal_H[i,i]=k
@@ -153,57 +183,57 @@ class QBM:
             for i in range(0,1024):
                 trace+=eff_matrix[i,i]
             return trace
-        aver=quad(intergrd,0,1)
+        aver,_=quad(intergrd,0,1)
         return aver
 
-    def lossfunction(self,f):
+    def lossfunction(self,x):
         L=0
         I=np.identity(1024)
-        b,w,gamma=self.f_to_b_w_gamma(f)
-        Z=self.cal_average(gamma,b,w,I)
+        H = self.cal_H(x)
+        Z=self.cal_average(x,I,H)
         for i,k in enumerate(self.Pv):
-            L+=-(k*np.log(self.cal_average(gamma,b,w,self.lam[i])/Z))
+            L+=-(k*np.log(self.cal_trHv(self.state[i],x,I,H)/Z))
         return L
-    def grad_loss(self,f):
+    def grad_loss(self,x):
         grad=0
         cc=0
-        grad_f=np.zeros(np.size(f))
+        grad_f=np.zeros(np.size(x))
         I = np.identity(1024)
-        b, w, gamma = self.f_to_b_w_gamma(f)
-        Z = self.cal_average(gamma, b, w, I)
-        gamma_list, b_list, w_list=self.matrix_list()
-        for n, theta in enumerate(b_list):
+        H = self.cal_H(x)
+        Z = self.cal_average(x, I,H)
+        x_list=self.matrix_list()
+        for n, theta in enumerate(x_list[0:N+N*N]):
             grad=0
-            trall=self.intergrade_aver(gamma, b, w, I, theta)
+            print("start intergrate")
+            trall=self.intergrade_aver(x,I,theta,H)
+            print(trall)
             for i, k in enumerate(self.Pv):
-
-                grad += k * (self.intergrade_aver(gamma, b, w,self.lam[i],theta)/self.cal_average(gamma,b,w,self.lam[i])-trall/Z)
+                grad += k * (self.cal_trHv(self.state[i],x,theta,H)/self.cal_trHv(self.state[i],x,I,H)-trall/Z)
+            print(grad)
             grad_f[n]=grad
-        for i in range(0,N):
-            for j in range(0,N):
-                grad=0
-                trxall=self.intergrade_aver(gamma, b, w, I, w_list[i][j])
-                for v, k in enumerate(self.Pv):
-                    grad += k * (self.intergrade_aver(gamma, b, w, self.lam[v], w_list[i][j]) / self.cal_average(gamma, b, w,self.lam[v]) - trxall / Z)
-                grad_f[N+cc] = grad
-                cc+=1
+
         grad=0
-        x_sum=gamma_list[0]
-        for x in gamma_list[1:]:
-            x_sum+=x
+        x_sum=np.sum(x_list[N+N*N:(2+N)*N])
+        trxall=self.intergrade_aver(x, I, x_sum,H)
         for v, k in enumerate(self.Pv):
-            grad += k * (self.intergrade_aver(gamma, b, w, self.lam[v], x_sum) / self.cal_average(gamma, b, w,self.lam[v]) - self.intergrade_aver(gamma, b, w, I, x_sum) / Z)
+            grad += k * (self.cal_trHv(self.state[v],x, x_sum,H) / self.cal_trHv(self.state[v],x,I,H) - trxall / Z)
         grad_f[-1]=grad
         return grad_f
     def callback(self,xk):
         self.loss_list.append(self.lossfunction(xk))
     def BFGS(self):
-        res= minimize(self.lossfunction,self.f,method="BFGS",jac=self.grad_loss,callback=self.callback,options={'maxiter':self.Iteration,"disp":True})
+        x=self.x.copy()
+        grad=self.grad_loss
+        loss=self.lossfunction
+        callback=self.callback
+        res= minimize(loss,x,method="BFGS",jac=grad,callback=callback,options={'maxiter':25,"disp":True})
         return res
     def pl(self):
         iteration=np.arange(1,26,1)
         plt.plot(iteration,self.loss_list)
         plt.show()
-QBM_t=QBM(N,M,Iteration,points,Pvdata,b,w)
-QBM_t.BFGS()
-QBM_t.pl()
+b=np.full(shape=N,fill_value=1)
+w=np.full(shape=(N,N),fill_value=1)
+QBM_b=QBM(N,M,Iteration,points,Pvdata,b,w)
+QBM_b.BFGS()
+QBM_b.pl()
