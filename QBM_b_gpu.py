@@ -39,6 +39,12 @@ class QBM:
         self.state=[self.state_v(num) for num in self.binary_points]
         self.loss_list=[]
     def state_v(self,num):
+        """
+        输入一个态的编号，将其转换为向量的形式，
+        一维向量：1024*1
+        :param num:
+        :return:
+        """
         T = np.array([1, 0])
         F = np.array([0, 1])
         if num[0] == 1:
@@ -52,6 +58,11 @@ class QBM:
                 lam = np.kron(lam, F)
         return lam
     def lambda_v(self,num):
+        """
+        计算lambda_v算符，用于clamp H
+        :param num:
+        :return:
+        """
         T=np.array([[1,0],
                   [0,0]])
         F=np.array([[0,0],
@@ -67,6 +78,14 @@ class QBM:
                 lam = np.kron(lam, F)
         return lam
     def wb_to_f(self,gamma,b,w):
+        """
+        将系数gamma,b,w转换成一个array方便BFGS运算，这里是按照b,w,gamma的顺序存放。
+        w是一列一列的存
+        :param gamma:
+        :param b:
+        :param w:
+        :return:
+        """
         N=self.N
         f = np.hstack([b, w.reshape(-1), gamma])
         return f
@@ -78,6 +97,10 @@ class QBM:
         print(w)
         return b,w,gamma
     def matrix_list(self):
+        """
+        计算ising model中所有需要的泡利算符，并返回成一个列表储存
+        :return:
+        """
         N=self.N
         d=np.power(2,10).item()
         gamma_list=[None]*N
@@ -150,6 +173,14 @@ class QBM:
             all[:,i]=self.ret_binary(i)
         return all
     def cal_trHv(self,state,x,operator,H):
+        """
+        计算 Hv的迹
+        :param state:
+        :param x:
+        :param operator:
+        :param H:
+        :return:
+        """
         trace=0
         aver=state.T@H@state
         grad=state.T@operator@state
@@ -158,6 +189,14 @@ class QBM:
         return trace
 
     def cal_average(self,x,operator,H):
+        """
+        计算算符的平均值，
+        按照Tr[operator*rho]
+        :param x:
+        :param operator:
+        :param H:
+        :return:
+        """
         aver=0
         P=np.zeros(np.power(2,self.N).item())
         eigvals,U=np.linalg.eigh(H)
@@ -171,6 +210,15 @@ class QBM:
         aver*=np.exp(-l_min)
         return aver
     def intergrade_aver(self,x,operator1,operator2,H):
+        """
+        计算H的偏导数产生的算符于H不对易的情况下operator的平均值
+        :param x:
+        :param operator1:
+        :param operator2:
+        :param H:
+        :return:
+        """
+
         aver=0
         diagnal_H=np.identity(np.power(2, self.N).item())
         eigvals, U = np.linalg.eigh(H)
@@ -211,7 +259,7 @@ class QBM:
         for n, theta in enumerate(x_list[0:N+N*N]):
             grad=0
             print("start intergrate")
-            trall=self.intergrade_aver(x,I,theta,H)
+            trall=self.cal_average(x,theta,H)
             print(trall)
             for i, k in enumerate(self.Pv):
                 grad += k * (self.cal_trHv(self.state[i],x,theta,H)/self.cal_trHv(self.state[i],x,I,H)-trall/Z)
@@ -221,7 +269,7 @@ class QBM:
 
         grad=0
         x_sum=np.sum(x_list[N+N*N:(2+N)*N])
-        trxall=self.intergrade_aver(x, I, x_sum,H)
+        trxall=self.cal_average(x, x_sum,H)
         for v, k in enumerate(self.Pv):
             grad += k * (self.cal_trHv(self.state[v],x, x_sum,H) / self.cal_trHv(self.state[v],x,I,H) - trxall / Z)
         grad_f[-1]=grad
